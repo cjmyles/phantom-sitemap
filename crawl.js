@@ -41,7 +41,7 @@ var Path = require('path');
 //TODO update wash.js in repo
 
 
-var defaultOptions = { 
+var defaults = { 
   maxDepth: 5,
   maxFollow: 0,
   verbose: false,
@@ -54,17 +54,16 @@ var defaultOptions = {
   cacheDir: './cache',
   sitemap: true,
   html: false,
-  out: 'sitemap.xml',
-  replaceHost: 'www.example.com'
+  out: 'sitemap.xml'
+  // replaceHost: 'www.example.com'
 };
 
 function getCrawler(options) {
-
-  var followed;
-  var dynamic;
-  var host;
-  var files;
-  var text;
+  var followed,
+    dynamic,
+    host,
+    files,
+    text;
 
   // var log = [];
   function debug() {
@@ -74,34 +73,39 @@ function getCrawler(options) {
 
   function filter(url) {
     var parsed = Url.parse(url);
+
     function ignore(url) {
       return options.ignore.some(function(e) {
         return url.match(new RegExp('\\.' + e + '$', 'i'));
       });
     }
+
     return parsed.host !== host || ignore(url);
   }
 
   function fetchSitemap(url) {
     var vow = VOW.make();
+
     request(Url.resolve(url, 'sitemap.xml'), function(err, response, body) {
-      if (err || response.statusCode !== 200) vow.keep([]);
-      else {
+      if (err || response.statusCode !== 200) {
+        vow.keep([]);
+      } else {
         parseString(body, function(err, result) {
           if (err) {
-            debug('no sitemap found');
+            debug('No sitemap.xml found at', url);
             vow.keep([]);
-          }
-          else {
+          } else {
+            debug('sitemap.xml found at', url);
             var urls = [];
             result.urlset.url.forEach(function(l) {
-                urls.push(l.loc[0]);
+              urls.push(l.loc[0]);
             });
             vow.keep(urls);
           }
         });
       }
     });
+
     return vow.promise;
   }
 
@@ -118,11 +122,10 @@ function getCrawler(options) {
     if (result.links) {
       links = result.links;
       links.forEach(function(l) {
-          text[l.href] = l.text;
+        text[l.href] = l.text;
       });
-    }
-    else if (result.headers && result.headers['content-type'] === 'text/html' && $) {
-      $("a").each(function(index,a) {
+    } else if (result.headers && result.headers['content-type'] === 'text/html' && $) {
+      $('a').each(function(index,a) {
         links.push(a.href);
         text[a.href] = $(a).text();
       });
@@ -131,11 +134,18 @@ function getCrawler(options) {
   }
 
   function maxFollowed(vow) {
+    var isMax = false;
+
     if (options.maxFollow && Object.keys(followed).length >= options.maxFollow) {
       if (vow.status() === 'pending') vow.keep();
-      return true;
+      isMax = true;
     }
-    return false;
+    
+    if (isMax) {
+      debug('maxFollowed is true')
+    }
+
+    return isMax;
   }
 
   function validUri(uri) {
@@ -144,13 +154,14 @@ function getCrawler(options) {
 
   function getHtml(url, cb) {
     debug('washing ' + url);
+
     wash(url).when(
       function(result) { //html, headers and links
         fs.outputJsonSync(Path.resolve(__dirname, options.cacheDir, md5(url)), { val: result.html } );
         result.body = result.html;
         cb(result);
-      }
-      ,function(err) {
+      },
+      function(err) {
         debug('ERROR washing url:', err);
         cb();
       }
@@ -167,30 +178,40 @@ function getCrawler(options) {
       retries: options.retries,
       callback: function(error, result, $) {
         // debug('in callback \n', error ? error : 'no error', result ? result.body.slice(0,20): '');
-        if (error) debug('error', error);
+        if (error) {
+          debug('error', error);
+        }
+
         if ($ && $('meta[name="fragment"][content="!"]').length) {
+          debug('Ajax crawler meta tag found');
           fetch('phantom', result.uri, result.options.depth); //fetch again          
           return;
         } else {
-          console.info('No ajax crawler meta tag found!');
+          debug('No ajax crawler meta tag found');
         }
+
         if (maxFollowed(vow)) {
-          console.log('max followed')
           return;
         }
-        var links = extractLinks(result, $);                
+
+        var links = extractLinks(result, $);  
+        debug('Links length', links.length);
         
         links.forEach(function(link) {
-          var href = link.href || link;
-          var url = Url.parse(href);
-          var ext = Path.extname(url.pathname).slice(1);
-          var method;
+          var href = link.href || link,
+            url = Url.parse(href),
+            ext = Path.extname(url.pathname).slice(1),
+            method;
+
           if (options.include.indexOf(ext) !== -1 && !files[url.pathname]) {
             files[url.pathname] = true;
             debug('Found included file:', url.pathname);
             method = 'ignore';
-          } 
-          else method = url.hash && url.hash.indexOf('#!') === 0 ? 'phantom' : 'crawl';
+          } else {
+            method = url.hash && url.hash.indexOf('#!') === 0 ? 'phantom' : 'crawl';
+          }
+          
+          debug('Calling fetch on', href);
           fetch(method, href, result.options.depth + 1);
         });
       },
@@ -251,32 +272,39 @@ function getCrawler(options) {
   }
 
   function getData(seed) {
-    var vow = VOW.make();
-    // vow.keep('xxxxblaxxxxxbla\nxxxxxbla');
-    // return vow.promise;;
-        var seeds = [];
+    var vow = VOW.make(),
+      seeds = [];
+
     followed = {};
     dynamic = [];
     files = {};
     text = {};
-    debug(options);
+    
     host = Url.parse(seed || '').host;
-    if (!host) vow.breek('No seed passed in.');
-    else {
+
+    if (!host) {
+      vow.breek('No seed passed in.');
+    } else {
       fetchSitemap(seed).when(
         function(someLinks) {
-          if (!options.sitemap)
+          if (!options.sitemap) {
             someLinks.forEach(function(l) {
                 seeds.push(l);
             });
-          if (seed) seeds.push(seed);
+          }
+
+          if (seed) {
+            seeds.push(seed);
+          }
+
           function recur() {
             if (seeds.length) {
               harvest(seeds.pop()).when(
                 recur
               );
+            } else {
+              respond(vow, seed);
             }
-            else respond(vow, seed);
           }
 
           recur();
@@ -312,7 +340,7 @@ function getCrawler(options) {
 
 module.exports = {
   getCrawler: function(someOptions) {
-    var options = extend(extend({}, defaultOptions), someOptions);
+    var options = extend(extend({}, defaults), someOptions);
     return getCrawler(options);
   }
 };
