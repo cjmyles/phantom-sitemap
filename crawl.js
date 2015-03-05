@@ -21,6 +21,7 @@ var wash = require('url_washer');
 var fs = require('fs-extra');
 var md5 = require('MD5');
 var Path = require('path');
+var _ = require('underscore');
 // util = require("util");
 
 //Modified crawler.js module, line 384:
@@ -49,8 +50,13 @@ var defaults = {
   timeout: 60000,
   retryTimeout: 10000,
   retries: 3,
-  ignore: ['xls', 'png', 'jpg', 'png','js', 'css'],
-  include: ['pdf', 'doc', 'docx'],
+  ignore: {
+    extensions: ['xls', 'png', 'jpg', 'png','js', 'css'],
+    uris: []
+  },
+  include: {
+    extensions: ['pdf', 'doc', 'docx']
+  },
   cacheDir: './cache',
   sitemap: true,
   html: false,
@@ -65,6 +71,8 @@ function getCrawler(options) {
     files,
     text;
 
+  debug(options);
+
   // var log = [];
   function debug() {
     if (options.verbose) console.log.apply(console, arguments);
@@ -74,13 +82,19 @@ function getCrawler(options) {
   function filter(url) {
     var parsed = Url.parse(url);
 
-    function ignore(url) {
-      return options.ignore.some(function(e) {
+    function ignoreByExtension(url) {
+      return options.ignore.extensions.some(function(e) {
         return url.match(new RegExp('\\.' + e + '$', 'i'));
       });
     }
 
-    return parsed.host !== host || ignore(url);
+    function ignoreByUri(url) {
+      return options.ignore.uris.some(function(e) {
+        return url.indexOf(e) !== -1;  
+      });
+    }
+
+    return parsed.host !== host || ignoreByExtension(url) || ignoreByUri(url);
   }
 
   function fetchSitemap(url) {
@@ -183,11 +197,9 @@ function getCrawler(options) {
         }
 
         if ($ && $('meta[name="fragment"][content="!"]').length) {
-          debug('Ajax crawler meta tag found');
+          // debug('Ajax crawler meta tag found');
           fetch('phantom', result.uri, result.options.depth); //fetch again          
           return;
-        } else {
-          debug('No ajax crawler meta tag found');
         }
 
         if (maxFollowed(vow)) {
@@ -195,7 +207,7 @@ function getCrawler(options) {
         }
 
         var links = extractLinks(result, $);  
-        debug('Links length', links.length);
+        // debug('Links length', links.length);
         
         links.forEach(function(link) {
           var href = link.href || link,
@@ -203,7 +215,7 @@ function getCrawler(options) {
             ext = Path.extname(url.pathname).slice(1),
             method;
 
-          if (options.include.indexOf(ext) !== -1 && !files[url.pathname]) {
+          if (options.include.extensions.indexOf(ext) !== -1 && !files[url.pathname]) {
             files[url.pathname] = true;
             debug('Found included file:', url.pathname);
             method = 'ignore';
@@ -211,7 +223,6 @@ function getCrawler(options) {
             method = url.hash && url.hash.indexOf('#!') === 0 ? 'phantom' : 'crawl';
           }
           
-          debug('Calling fetch on', href);
           fetch(method, href, result.options.depth + 1);
         });
       },
@@ -338,11 +349,13 @@ function getCrawler(options) {
 }
 
 
-module.exports = {
-  getCrawler: function(someOptions) {
-    var options = extend(extend({}, defaults), someOptions);
-    return getCrawler(options);
-  }
+module.exports = function(someOptions) {
+  var include = _.extend(defaults.include, someOptions.include),
+    ignore = _.extend(defaults.ignore, someOptions.ignore),
+    options = _.extend(defaults, someOptions);
+  options.include = include;
+  options.ignore = ignore;
+  return getCrawler(options);
 };
 
 // module.exports = 
